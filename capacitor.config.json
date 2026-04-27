@@ -1,0 +1,8 @@
+{
+  "appId": "com.erikorlantas.app",
+  "appName": "Erikorlantas11",
+  "webDir": "build",
+  "server": {
+    "androidScheme": "http"
+  }
+}
