@@ -1,145 +1,270 @@
-import React, { useState, useEffect } from 'react';
-import { User, Lock, Search, ShieldAlert, LogOut, UserPlus, Phone, ChevronLeft, Shield } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { initializeApp } from "firebase/app";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc
+} from "firebase/firestore";
+
+// 🔥 CONFIG FIREBASE
+const firebaseConfig = {
+  apiKey: "AIzaSyC1hzlTkTt1AK4DhkR13XpB_wmal4s2v38",
+  authDomain: "eri-korlantas.firebaseapp.com",
+  projectId: "eri-korlantas",
+  storageBucket: "eri-korlantas.firebasestorage.app",
+  messagingSenderId: "472012289728",
+  appId: "1:472012289728:web:86b6e0c5354f1e6ef99f25"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 export default function App() {
-  const [view, setView] = useState('login');
-  const [currentUser, setCurrentUser] = useState(null);
-  const [usersDb, setUsersDb] = useState([]);
+  const [user, setUser] = useState(null);
+  const [loginId, setLoginId] = useState("");
+  const [loginPass, setLoginPass] = useState("");
 
-  const [loginId, setLoginId] = useState('');
-  const [loginPass, setLoginPass] = useState('');
-  const [loginError, setLoginError] = useState('');
+  const [query, setQuery] = useState("");
+  const [result, setResult] = useState("");
 
-  const [newUserId, setNewUserId] = useState('');
-  const [newUserPass, setNewUserPass] = useState('');
-  const [newUserPeriod, setNewUserPeriod] = useState('1');
-  const [adminMsg, setAdminMsg] = useState('');
+  const [newUser, setNewUser] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [days, setDays] = useState("");
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResult, setSearchResult] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  // =====================
+  // 🔐 LOGIN
+  // =====================
+  const handleLogin = async () => {
+    const ref = doc(db, "users", loginId);
+    const snap = await getDoc(ref);
 
-  useEffect(() => {
-    const storedUsers = localStorage.getItem('eri_users');
-    if (storedUsers) {
-      setUsersDb(JSON.parse(storedUsers));
-    } else {
-      const initialDb = [{
-        id: 'Admin',
-        password: 'Naga2588',
-        role: 'admin',
-        masaAktif: 'UNLIMITED',
-        deviceId: null
-      }];
-      setUsersDb(initialDb);
-      localStorage.setItem('eri_users', JSON.stringify(initialDb));
+    if (!snap.exists()) return alert("User tidak ada");
+
+    const data = snap.data();
+
+    if (data.pass !== loginPass) return alert("Password salah");
+
+    // ❌ CEK DISABLE
+    if (data.active === false) {
+      alert("AKUN NONAKTIF!");
+      return;
     }
+
+    const deviceId = navigator.userAgent;
+
+    if (data.device && data.device !== deviceId) {
+      alert("AKUN SUDAH DIGUNAKAN DI DEVICE LAIN!");
+      return;
+    }
+
+    await updateDoc(ref, { device: deviceId });
+
+    setUser({ ...data, docId: loginId });
+    localStorage.setItem("user", JSON.stringify({ ...data, docId: loginId }));
+  };
+
+  // =====================
+  // 🔄 AUTO LOGIN
+  // =====================
+  useEffect(() => {
+    const saved = localStorage.getItem("user");
+    if (saved) setUser(JSON.parse(saved));
   }, []);
 
-  const handleLogin = (e) => {
-    e.preventDefault();
-    setLoginError('');
+  // =====================
+  // ⏳ CEK MASA AKTIF + REALTIME
+  // =====================
+  useEffect(() => {
+    if (!user) return;
 
-    const user = usersDb.find(u => u.id === loginId && u.password === loginPass);
+    const interval = setInterval(async () => {
+      const ref = doc(db, "users", user.docId);
+      const snap = await getDoc(ref);
+      const data = snap.data();
 
-    if (!user) {
-      setLoginError('User ID atau Password salah!');
-      return;
+      // ❌ DISABLE CHECK
+      if (data.active === false) {
+        alert("AKUN DINONAKTIFKAN!");
+        logout();
+      }
+
+      // ❌ EXPIRED CHECK
+      if (data.exp !== "lifetime") {
+        const now = Date.now();
+        const created = data.createdAt || now;
+        const expTime = created + data.exp * 86400000;
+
+        if (now > expTime) {
+          alert("MASA AKTIF HABIS!");
+          logout();
+        }
+      }
+
+      // ❌ DEVICE CHECK
+      if (data.device !== navigator.userAgent) {
+        alert("LOGIN DI DEVICE LAIN!");
+        logout();
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // =====================
+  // 🔍 SEARCH (API)
+  // =====================
+  const handleSearch = async () => {
+    if (!query) return;
+
+    setResult("LOADING...");
+
+    try {
+      const res = await fetch(
+        `http://10.41.177.45:3000/api?q=${encodeURIComponent(query.trim())}`
+      );
+      const data = await res.json();
+
+      if (!data || data.length === 0) {
+        setResult("DATA TIDAK DITEMUKAN");
+        return;
+      }
+
+      const d = data[0];
+
+      // ✅ NOPOL FULL (TIDAK TERPOTONG)
+      const nopolFull = `${d.wilayah}${d.nopol}${d.seri}`;
+
+      const hasil = `
+DATABASE
+════════════════
+• PEMILIK
+NAMA  : ${d.NamaPemilik}
+NIK   : ${d.NoKTP}
+HP    : ${d.NoHP}
+EMAIL : ${d.Email}
+KERJA : ${d.Pekerjaan}
+════════════════
+• ALAMAT
+${d.alamat}
+════════════════
+• INFO
+NOPOL   : ${nopolFull}
+MEREK   : ${d.Merk}
+TYPE    : ${d.Type}
+TAHUN   : ${d.TahunPembuatan}
+WARNA   : ${d.Warna}
+CC      : ${d.IsiCylinder} CC
+════════════════
+• DOKUMEN
+NOKA       : ${d.NoRangka}
+NOSIN      : ${d.NoMesin}
+NO. BPKB   : ${d.NoBPKB}
+NO. STNK   : ${d.NoSTNK}
+TGL DAFTAR : ${d.TanggalDaftar}
+════════════════
+`;
+
+      setResult(hasil);
+    } catch {
+      setResult("ERROR AMBIL DATA API");
     }
-
-    setCurrentUser(user);
-    setView('dashboard');
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setView('login');
+  // =====================
+  // ➕ TAMBAH USER
+  // =====================
+  const handleAddUser = async () => {
+    if (!newUser || !newPass || !days) return alert("Isi semua");
+
+    await setDoc(doc(db, "users", newUser), {
+      id: newUser,
+      pass: newPass,
+      role: "user",
+      exp: Number(days),
+      device: "",
+      active: true,
+      createdAt: Date.now()
+    });
+
+    alert("User ditambahkan!");
   };
 
-  const handleAddUser = (e) => {
-    e.preventDefault();
-
-    if (!newUserId || !newUserPass) {
-      setAdminMsg('Isi semua data!');
-      return;
-    }
-
-    if (usersDb.some(u => u.id === newUserId)) {
-      setAdminMsg('User sudah ada!');
-      return;
-    }
-
-    const newUser = {
-      id: newUserId,
-      password: newUserPass,
-      role: 'user',
-      masaAktif: '30 hari',
-      deviceId: null
-    };
-
-    const updatedDb = [...usersDb, newUser];
-    setUsersDb(updatedDb);
-    localStorage.setItem('eri_users', JSON.stringify(updatedDb));
-
-    setAdminMsg("Berhasil! User " + newUserId + " ditambahkan.");
-    setNewUserId('');
-    setNewUserPass('');
+  // =====================
+  // 🚪 LOGOUT
+  // =====================
+  const logout = () => {
+    localStorage.clear();
+    setUser(null);
   };
 
-  const handleSearch = () => {
-    if (!searchQuery) return;
-
-    setIsLoading(true);
-
-    setTimeout(() => {
-      setSearchResult("DATA DITEMUKAN UNTUK: " + searchQuery);
-      setIsLoading(false);
-    }, 1000);
-  };
+  // =====================
+  // 🔐 LOGIN UI
+  // =====================
+  if (!user) {
+    return (
+      <div style={{ padding: 20 }}>
+        <h2>LOGIN</h2>
+        <input placeholder="User" onChange={e => setLoginId(e.target.value)} />
+        <br />
+        <input
+          type="password"
+          placeholder="Password"
+          onChange={e => setLoginPass(e.target.value)}
+        />
+        <br />
+        <button onClick={handleLogin}>Login</button>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ padding: 20, color: 'white', background: '#111', minHeight: '100vh' }}>
+    <div style={{ padding: 20 }}>
+      <h3>
+        {user.role === "admin" ? "ADMIN" : "USER"} | Masa aktif: {user.exp}
+      </h3>
 
-      {view === 'login' && (
-        <div>
-          <h2>LOGIN</h2>
-          <input placeholder="User" onChange={(e) => setLoginId(e.target.value)} /><br/><br/>
-          <input type="password" placeholder="Password" onChange={(e) => setLoginPass(e.target.value)} /><br/><br/>
-          <button onClick={handleLogin}>Login</button>
-          <p>{loginError}</p>
-        </div>
-      )}
+      <button onClick={logout}>Logout</button>
 
-      {view === 'dashboard' && (
-        <div>
-          <h2>DASHBOARD</h2>
-          <input placeholder="Cari data..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-          <button onClick={handleSearch}>Cari</button>
-
-          {isLoading && <p>Loading...</p>}
-          <pre>{searchResult}</pre>
-
-          {currentUser && currentUser.role === 'admin' && (
-            <button onClick={() => setView('admin')}>Admin Panel</button>
-          )}
-
-          <br/><br/>
-          <button onClick={handleLogout}>Logout</button>
-        </div>
-      )}
-
-      {view === 'admin' && (
-        <div>
-          <h2>ADMIN</h2>
-          <input placeholder="User Baru" value={newUserId} onChange={(e) => setNewUserId(e.target.value)} /><br/>
-          <input placeholder="Password" value={newUserPass} onChange={(e) => setNewUserPass(e.target.value)} /><br/>
+      {/* ADMIN */}
+      {user.role === "admin" && (
+        <>
+          <h4>Tambah User</h4>
+          <input placeholder="User" onChange={e => setNewUser(e.target.value)} />
+          <input placeholder="Password" onChange={e => setNewPass(e.target.value)} />
+          <input placeholder="Hari aktif" onChange={e => setDays(e.target.value)} />
           <button onClick={handleAddUser}>Tambah</button>
-          <p>{adminMsg}</p>
-
-          <button onClick={() => setView('dashboard')}>Kembali</button>
-        </div>
+          <hr />
+        </>
       )}
 
+      {/* SEARCH */}
+      <input
+        placeholder="Cari Nopol / NIK / Nosin / Norangka"
+        onChange={e => setQuery(e.target.value)}
+      />
+      <button onClick={handleSearch}>Cari</button>
+
+      <pre>{result}</pre>
+
+      {result && (
+        <>
+          <button onClick={() => navigator.clipboard.writeText(result)}>
+            Copy
+          </button>
+
+          <button
+            onClick={() =>
+              window.open(
+                `https://wa.me/?text=${encodeURIComponent(result)}`
+              )
+            }
+          >
+            Share WA
+          </button>
+        </>
+      )}
     </div>
   );
 }
